@@ -168,13 +168,15 @@
            :on-click (fn [_e] (.then (fetch-fn (assoc fetch-opts :offset count :path path))
                                      #(swap! !x update path concat-into %)))} more (when unbounded? "+") " more…"]]))))
 
+(declare expandable-path?)
+
 (defn expanded-path? [!expanded-at path]
-  (some-> !expanded-at deref (get path)))
+  (and (some-> !expanded-at deref (get path))
+       (expandable-path? !expanded-at path)))
 
 (defn expandable-path? [!expanded-at path]
-  (or
-   (= path [])
-   (expanded-path? !expanded-at (vec (drop-last path)))))
+  (or (empty? path)
+      (expanded-path? !expanded-at (vec (drop-last path)))))
 
 (defn inspect-children [opts]
   ;; TODO: move update function onto viewer
