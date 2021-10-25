@@ -170,21 +170,21 @@
 
 (declare expandable-path?)
 
-(defn expanded-path? [!expanded-at path]
+(defn expanded-path? [{:as opts :keys [!expanded-at path]}]
   (and (some-> !expanded-at deref (get path))
-       (expandable-path? !expanded-at path)))
+       (expandable-path? opts)))
 
-(defn expandable-path? [!expanded-at path]
+(defn expandable-path? [{:as opts :keys [path]}]
   (or (empty? path)
-      (expanded-path? !expanded-at (vec (drop-last path)))))
+      (expanded-path? (assoc opts :path (vec (drop-last path))))))
 
 (defn inspect-children [opts]
   ;; TODO: move update function onto viewer
   (map-indexed (fn [idx x] [inspect x (update opts :path conj idx)])))
 
 (defn coll-viewer [{:keys [open close]} xs {:as opts :keys [!expanded-at path] :or {path []}}]
-  (let [expanded? (expanded-path? !expanded-at path)
-        expandable? (expandable-path? !expanded-at path)]
+  (let [expanded? (expanded-path? opts)
+        expandable? (expandable-path? opts)]
     (html [:span.inspected-value.whitespace-nowrap
            {:class (when expanded? "inline-flex")}
            [:span
@@ -212,11 +212,9 @@
                                       (fn [x] (swap! !x assoc path x))))} "…"])))
 
 (defn map-viewer [xs {:as opts :keys [!expanded-at path] :or {path []}}]
-  (let [expanded? (expanded-path? !expanded-at path)
-        expandable? (expandable-path? !expanded-at path)]
+  (let [expanded? (expanded-path? opts)
+        expandable? (expandable-path? opts)]
     (html [:span.inspected-value.whitespace-nowrap
-           (when expandable?
-             {:on-click (partial toggle-expanded !expanded-at path)})
            [:span.bg-opacity-70.rounded-sm
             (when expandable?
               {:on-click (partial toggle-expanded !expanded-at path)
