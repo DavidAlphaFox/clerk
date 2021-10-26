@@ -292,7 +292,7 @@
     "Returns a description of a given value `xs`."
     ([xs]
      (describe {:viewers (get-viewers *ns* (viewers xs))} xs))
-    ([{:as opts :keys [last? parens]} xs]
+    ([{:as opts :keys [last? parens collected-parens]} xs]
      (let [{:as opts :keys [viewers path]} (merge {:path []} (update opts :viewers preds->fn+))
            {:as viewer :keys [fetch-opts]} (try (select-viewer xs viewers)
                                                 (catch #?(:clj Exception :cljs js/Error) _ex
@@ -312,27 +312,31 @@
                                         (map-indexed (fn [i x] (describe (-> opts
                                                                              (update :path conj i)
                                                                              (assoc :last? (= i (dec count)))
-                                                                             (cond-> #_opts
-                                                                               (= i (dec count))
-                                                                               (update :parens (fnil conj []) closing))) x)))
+                                                                             (update :collected-parens (fnil conj []) closing)) x)))
                                         (remove nil?))
                                   (ensure-sorted xs))]
                ;; TODO: remove xs
                (cond-> (merge {:path path :xs xs :last? last?} count-opts)
-                 viewer (assoc :viewer (assoc viewer :closing-parens
-
-                                              (cond-> []
-                                                closing (conj closing)
-                                                (not last?)
-                                                (into (remove nil?) parens))))
+                 viewer (assoc :viewer (cond-> (assoc viewer :closing closing)
+                                         #_#_
+                                         (not last?) (assoc :closing-parens (into (if closing [closing] []) (remove nil?) parens))))
                  (seq children) (assoc :children children)))
 
              (and (string? xs) (< (:n fetch-opts 20) (count xs)))
              {:path path :count (count xs) :viewer viewer}
 
              :else nil))))
-  (nextjournal.clerk/show! "notebooks/test.clj")
-  (describe {:foo [1 [2] [#{1 3 [2]}] 4 5]}))
+  (describe [[1] [2]]
+            #_ {:foo [1 [2], [#{[2],, [1 [3]]}], 4 5]}))
+
+#_(nextjournal.clerk/show! "notebooks/test.clj")
+(require '[clojure.zip :as zip])
+(let [d (describe [[1] [2]])
+      z (zip/zipper map? :children (fn [node children] (with-meta children (meta node))) d)]
+  (-> z
+      zip/down
+      #_      zip/right
+      zip/node))
 
 
 
