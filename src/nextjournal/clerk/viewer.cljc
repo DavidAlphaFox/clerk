@@ -270,52 +270,77 @@
 (defn preds->fn+ [viewers]
   (into [] #?(:clj (map #(update % :pred maybe->fn+))) viewers))
 
+(defn closing-paren [{:as _viewer :keys [fn name]}]
+  (or (-> fn last :close)
+      (when (= name :map) "}")))
+
+(defn bounded-count-opts [n xs]
+  (let [limit (+ n 10000)
+        count (try (bounded-count limit xs)
+                   (catch #?(:clj Exception :cljs js/Error) _
+                     nil))]
+    (cond-> {}
+      count (assoc :count count)
+      (or (not count) (= count limit)) (assoc :unbounded? true))))
+
+#_(bounded-count-opts 20 (range))
+#_(bounded-count-opts 20 (range 123456))
+
 ;; TODO: rename `xs` to `value`.
-(defn describe
-  "Returns a description of a given value `xs`."
-  ([xs]
-   (describe {:viewers (get-viewers *ns* (viewers xs))} xs))
-  ([opts xs]
-   (let [{:as opts :keys [viewers path]} (merge {:path []} (update opts :viewers preds->fn+))
-         {:as viewer :keys [fetch-opts]} (try (select-viewer xs viewers)
-                                              (catch #?(:clj Exception :cljs js/Error) _ex
-                                                nil))
-         xs (value xs)]
-     #_(prn :xs xs :type (type xs) :viewer viewer)
-     (cond (and (empty? path) (nil? fetch-opts)) (cond-> {:path path} viewer (assoc :viewer viewer)) ;; fetch everything
-           (map? xs) (let [children (sequence (comp (map-indexed #(describe (update opts :path conj %1) %2))
-                                                    (remove (comp empty? :children)))
-                                              (ensure-sorted xs))]
-                       (cond-> {:count (count xs) :path path}
-                         viewer (assoc :viewer viewer)
-                         (seq children) (assoc :children children)))
-           (and (counted? xs) (seqable? xs)) (let [children (sequence (comp (map-indexed #(describe (update opts :path conj %1) %2))
-                                                                            (remove nil?))
-                                                                      (ensure-sorted xs))]
-                                               (cond-> {:path path :count (count xs)}
-                                                 viewer (assoc :viewer viewer)
-                                                 (seq children) (assoc :children children)))
-           ;; uncounted sequences assumed to be lazy
-           (seq? xs) (let [{:keys [n]} fetch-opts
-                           limit (+ n 10000)
-                           count (try (bounded-count limit xs)
-                                      (catch #?(:clj Exception :cljs js/Error) _
-                                        nil))
-                           children (sequence (comp (drop+take-xf fetch-opts)
-                                                    (map-indexed #(describe (update opts :path conj %1) %2))
-                                                    (remove nil?)) xs)]
-                       (cond-> {:path path :viewer viewer}
-                         count (assoc :count count)
-                         (or (not count) (= count limit)) (assoc :unbounded? true)
-                         (seq children) (assoc :children children)))
-           (and (string? xs) (< (:n fetch-opts 20) (count xs))) {:path path :count (count xs) :viewer viewer}
-           :else nil))))
+(do
+  (defn describe
+    "Returns a description of a given value `xs`."
+    ([xs]
+     (describe {:viewers (get-viewers *ns* (viewers xs))} xs))
+    ([{:as opts :keys [last? parens]} xs]
+     (let [{:as opts :keys [viewers path]} (merge {:path []} (update opts :viewers preds->fn+))
+           {:as viewer :keys [fetch-opts]} (try (select-viewer xs viewers)
+                                                (catch #?(:clj Exception :cljs js/Error) _ex
+                                                  nil))
+           closing (closing-paren viewer)
+           xs (value xs)]
+       #_(prn :xs xs :type (type xs) :viewer viewer)
+       (cond (and (empty? path) (nil? fetch-opts))
+             (cond-> {:path path} viewer (assoc :viewer viewer)) ;; fetch everything
+
+             (seqable? xs)
+             (let [{:as count-opts :keys [count]} (if (counted? xs)
+                                                    {:count (count xs)}
+                                                    (bounded-count-opts (:n fetch-opts) xs))
+                   children (into []
+                                  (comp (if (counted? xs) identity (drop+take-xf fetch-opts))
+                                        (map-indexed (fn [i x] (describe (-> opts
+                                                                             (update :path conj i)
+                                                                             (assoc :last? (= i (dec count)))
+                                                                             (cond-> #_opts
+                                                                               (= i (dec count))
+                                                                               (update :parens (fnil conj []) closing))) x)))
+                                        (remove nil?))
+                                  (ensure-sorted xs))]
+               ;; TODO: remove xs
+               (cond-> (merge {:path path :xs xs :last? last?} count-opts)
+                 viewer (assoc :viewer (assoc viewer :closing-parens
+
+                                              (cond-> []
+                                                closing (conj closing)
+                                                (not last?)
+                                                (into (remove nil?) parens))))
+                 (seq children) (assoc :children children)))
+
+             (and (string? xs) (< (:n fetch-opts 20) (count xs)))
+             {:path path :count (count xs) :viewer viewer}
+
+             :else nil))))
+  (nextjournal.clerk/show! "notebooks/test.clj")
+  (describe {:foo [1 [2] [#{1 3 [2]}] 4 5]}))
+
+
 
 (comment
   (describe complex-thing)
   (describe {:hello :world})
   (describe {:one [1 2 3] 1 2 3 4})
-  (describe [1 2 [1 2 3] 4 5])
+  (describe [1 2 [1 [2] 3] 4 5])
   (describe (clojure.java.io/file "notebooks"))
   (describe {:viewers [{:pred sequential? :fn pr-str}]} (range 100))
   (describe (map vector (range)))
@@ -323,6 +348,17 @@
   (describe (plotly {:data [{:z [[1 2 3] [3 2 1]] :type "surface"}]}))
   (describe (with-viewer [:h1 "hi"] :html))
   (describe  {1 [2]}))
+
+(defn closing-parens [path->info path]
+  (get-in path->info [path :viewer :closing-parens]))
+
+(comment
+  (declare path->info)
+  (let [d (describe {:foo [1 [2] [#{1 3 [2]}] 4 5]})
+        info (path->info d)
+        path (last (sort (keys info)))]
+
+    (closing-parens info  path)))
 
 (defn extract-info [{:as desc :keys [path]}]
   ;; TODO: drop `:fetch-opts` key once we read it from `:viewer` in frontend
