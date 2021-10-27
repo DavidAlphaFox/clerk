@@ -297,7 +297,6 @@
            {:as viewer :keys [fetch-opts]} (try (select-viewer xs viewers)
                                                 (catch #?(:clj Exception :cljs js/Error) _ex
                                                   nil))
-           closing (closing-paren viewer)
            xs (value xs)]
        #_(prn :xs xs :type (type xs) :viewer viewer)
        (cond (and (empty? path) (nil? fetch-opts))
@@ -310,35 +309,42 @@
                    children (into []
                                   (comp (if (counted? xs) identity (drop+take-xf fetch-opts))
                                         (map-indexed (fn [i x] (describe (-> opts
-                                                                             (update :path conj i)
-                                                                             (assoc :last? (= i (dec count)))
-                                                                             (update :collected-parens (fnil conj []) closing)) x)))
+                                                                             (update :path conj i)) x)))
                                         (remove nil?))
                                   (ensure-sorted xs))]
                ;; TODO: remove xs
                (cond-> (merge {:path path :xs xs :last? last?} count-opts)
-                 viewer (assoc :viewer (cond-> (assoc viewer :closing closing)
-                                         #_#_
-                                         (not last?) (assoc :closing-parens (into (if closing [closing] []) (remove nil?) parens))))
+                 viewer (assoc :viewer viewer)
                  (seq children) (assoc :children children)))
 
              (and (string? xs) (< (:n fetch-opts 20) (count xs)))
              {:path path :count (count xs) :viewer viewer}
 
-             :else nil))))
-  (describe [[1] [2]]
-            #_ {:foo [1 [2], [#{[2],, [1 [3]]}], 4 5]}))
+             :else
+             {:viewer viewer :scalar? true}))))
+  (describe [[1] [2]]))
+
+(defn assign-closing-parens
+  ([node] (assign-closing-parens {} node))
+  ([{:as ctx :keys [closing-parens]} {:as node :keys [scalar? children viewer]}]
+   (let [c (when-not scalar? (closing-paren viewer))
+         defer-closing? (and (seq children) (not (:scalar? (last children))))]
+     (if (seq children)
+       (cond-> node
+         (and c (not defer-closing?))
+         (assoc :closing-parens (cons c closing-parens))
+         true
+         (update :children (fn unode [cs]
+                             (into []
+                                   (map-indexed (fn [i x]
+                                                  (assign-closing-parens (if (and defer-closing? (= (dec (count children)) i))
+                                                                           (update ctx :closing-parens (fn [cls] (cons c cls)))
+                                                                           (dissoc ctx :closing-parens))
+                                                                         x)))
+                                   cs))))
+       (cond-> node c (assoc :closing-parens (cons c closing-parens)))))))
 
 #_(nextjournal.clerk/show! "notebooks/test.clj")
-(require '[clojure.zip :as zip])
-(let [d (describe [[1] [2]])
-      z (zip/zipper map? :children (fn [node children] (with-meta children (meta node))) d)]
-  (-> z
-      zip/down
-      #_      zip/right
-      zip/node))
-
-
 
 (comment
   (describe complex-thing)
@@ -354,7 +360,7 @@
   (describe  {1 [2]}))
 
 (defn closing-parens [path->info path]
-  (get-in path->info [path :viewer :closing-parens]))
+  (get-in path->info [path :closing-parens]))
 
 (comment
   (declare path->info)
@@ -367,13 +373,13 @@
 (defn extract-info [{:as desc :keys [path]}]
   ;; TODO: drop `:fetch-opts` key once we read it from `:viewer` in frontend
   (-> desc
-      (select-keys [:count :viewer])
+      (select-keys [:count :viewer :closing-parens])
       (assoc :fetch-opts (-> desc
                              (get-in [:viewer :fetch-opts])
                              (assoc :path path)))))
 
 (defn path->info [desc]
-  (into {} (map (juxt :path extract-info)) (tree-seq (some-fn sequential? map?) :children desc)))
+  (into {} (map (juxt :path extract-info)) (tree-seq (some-fn sequential? map?) :children (assign-closing-parens desc))))
 
 #_(path->info (describe [1 [2] 3]))
 #_(path->info (plotly {:data [{:z [[1 2 3] [3 2 1]] :type "surface"}]}))
