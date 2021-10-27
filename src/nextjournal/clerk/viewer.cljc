@@ -329,20 +329,19 @@
   ([{:as ctx :keys [closing-parens]} {:as node :keys [scalar? children viewer]}]
    (let [c (when-not scalar? (closing-paren viewer))
          defer-closing? (and (seq children) (not (:scalar? (last children))))]
-     (if (seq children)
-       (cond-> node
-         (and c (not defer-closing?))
-         (assoc :closing-parens (cons c closing-parens))
-         true
-         (update :children (fn unode [cs]
+     (cond-> node
+       (and c (not defer-closing?))
+       (assoc :closing-parens (cons c closing-parens))
+       (seq children)
+       (update :children (fn [cs]
+                           (let [ccount (count cs)]
                              (into []
                                    (map-indexed (fn [i x]
-                                                  (assign-closing-parens (if (and defer-closing? (= (dec (count children)) i))
-                                                                           (update ctx :closing-parens (fn [cls] (cons c cls)))
+                                                  (assign-closing-parens (if (and defer-closing? (= (dec ccount) i))
+                                                                           (update ctx :closing-parens #(cons c %))
                                                                            (dissoc ctx :closing-parens))
                                                                          x)))
-                                   cs))))
-       (cond-> node c (assoc :closing-parens (cons c closing-parens)))))))
+                                   cs))))))))
 
 #_(nextjournal.clerk/show! "notebooks/test.clj")
 
