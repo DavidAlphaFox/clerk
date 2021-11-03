@@ -249,7 +249,7 @@
 
 (defn render-with-viewer [opts viewer value]
   #_(js/console.log :render-with-viewer {:value value :viewer viewer #_#_ :opts opts})
-  (cond (fn? viewer)
+  (cond (or (fn? viewer) (viewer/fn+form? viewer))
         (viewer value opts)
 
         (map? viewer)
@@ -263,9 +263,6 @@
             (let [render-fn (cond-> render-fn (not (fn? render-fn)) *eval*)]
               (render-fn value (assoc opts :fetch-opts fetch-opts))))
           (html (error-badge "cannot find viewer named " (str viewer))))
-
-        (ifn? viewer)
-        (render-with-viewer opts viewer value)
 
         :else
         (html (error-badge "unusable viewer `" (pr-str viewer) "`"))))
