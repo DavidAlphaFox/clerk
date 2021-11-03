@@ -247,9 +247,12 @@
 
 (declare default-viewers)
 
-(defn render-with-viewer [opts viewer value]
+(defn render-with-viewer [opts {:as viewer :keys [render-fn]} value]
   #_(js/console.log :render-with-viewer {:value value :viewer viewer #_#_ :opts opts})
-  (cond (or (fn? viewer) (viewer/fn+form? viewer))
+  (cond (viewer/fn+form? render-fn)
+        (render-fn value opts)
+
+        (fn? viewer)
         (viewer value opts)
 
         (map? viewer)
